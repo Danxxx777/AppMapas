@@ -2,6 +2,8 @@ package com.uteq.appmapas
 
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
+import android.widget.EditText
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -10,15 +12,28 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
-import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.Circle
+import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
-import com.google.android.gms.maps.model.PolylineOptions
+import com.google.android.material.slider.Slider
+import org.json.JSONObject
 
-
-class MainActivity : AppCompatActivity(), OnMapReadyCallback {
+class MainActivity : AppCompatActivity(), OnMapReadyCallback, Asynchtask {
 
     private var mapa: GoogleMap? = null
+    private var lat: Double = -0.9656154
+    private var lng: Double = -79.4684
+    private var radio: Double = 1.0
+    private var circulo: Circle? = null
+    private var markerCentro: Marker? = null
+    private val markers = mutableListOf<Marker>()
+
+    private lateinit var txtLat: EditText
+    private lateinit var txtLong: EditText
+    private lateinit var sliderRadio: Slider
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,9 +45,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             insets
         }
 
+        txtLat = findViewById(R.id.txtLat)
+        txtLong = findViewById(R.id.txtLong)
+        sliderRadio = findViewById(R.id.sliderRadio)
+
         val mapFragment = supportFragmentManager
             .findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
+
+        sliderRadio.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) {
+                radio = slider.value.toDouble()
+                updateInterfaz()
+            }
+            override fun onStopTrackingTouch(slider: Slider) {}
+        })
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -40,30 +67,75 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         googleMap.mapType = GoogleMap.MAP_TYPE_SATELLITE
         googleMap.uiSettings.isZoomControlsEnabled = true
 
-        val ubicacion = LatLng(-1.0126167, -79.4672262)
-        /*
-        val camPos = CameraPosition.Builder()
-            .target(ubicacion)
-            .zoom(18.5f)
-            .bearing(45f)
-            .tilt(65f)
-            .build()
-        val camUpd = CameraUpdateFactory.newCameraPosition(camPos)
-        googleMap.animateCamera(camUpd)
-        */
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(ubicacion, 17f))
+        val ubicacion = LatLng(lat, lng)
+        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(ubicacion, 15f))
 
-        val lineas = PolylineOptions()
-            .add(LatLng(-1.013466, -79.467421))
-            .add(LatLng(-1.012305, -79.467356))
-            .add(LatLng(-1.011929, -79.471851))
-            .add(LatLng(-1.013203, -79.471885))
-            .add(LatLng(-1.013466, -79.467421))
-            .color(Color.RED)
+        mapa?.setOnCameraIdleListener {
+            val center = mapa?.cameraPosition?.target
+            if (center != null) {
+                lat = center.latitude
+                lng = center.longitude
+                updateInterfaz()
+            }
+        }
 
-        googleMap.addPolyline(lineas)
-        googleMap.addMarker(MarkerOptions()
-            .position(LatLng(-1.0125223047554048, -79.46993149612423))
-            .title("Marcador en Ecuador"))
+        mapa?.setOnMarkerClickListener { marker ->
+            marker.showInfoWindow()
+            true
+        }
+
+        updateInterfaz()
+    }
+
+    private fun updateInterfaz() {
+        txtLat.setText(String.format("%.7f", lat))
+        txtLong.setText(String.format("%.4f", lng))
+
+        // Dibujar Círculo
+        circulo?.remove()
+        val circleOptions = CircleOptions()
+            .center(LatLng(lat, lng))
+            .radius(radio * 200) // Ajustado para que se vea como en la foto
+            .strokeColor(Color.RED)
+            .fillColor(Color.argb(70, 150, 50, 50))
+        circulo = mapa?.addCircle(circleOptions)
+
+        // Marcador central (el naranja de la foto de tu pana)
+        markerCentro?.remove()
+        markerCentro = mapa?.addMarker(
+            MarkerOptions()
+                .position(LatLng(lat, lng))
+                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE))
+                .title("Tu ubicación")
+        )
+
+        // Llamar WebService (Diapo 6)
+        val datos = HashMap<String, String>()
+        val url = "http://3.231.146.17/turismo10022025/lugar_turistico/json_getlistadoMapa?lat=$lat&lng=$lng&radio=${radio / 10.0}"
+        val ws = WebService(url, datos, this, this)
+        ws.execute("GET")
+    }
+
+    override fun processFinish(result: String) {
+        try {
+            // Limpiar marcadores turísticos anteriores
+            for (marker in markers) marker.remove()
+            markers.clear()
+
+            val jsonObj = JSONObject(result)
+            val jsonLista = jsonObj.getJSONArray("data")
+            
+            for (i in 0 until jsonLista.length()) {
+                val lugar = jsonLista.getJSONObject(i)
+                val marker = mapa?.addMarker(
+                    MarkerOptions()
+                        .position(LatLng(lugar.getDouble("lat"), lugar.getDouble("lng")))
+                        .title(lugar.getString("nombre"))
+                )
+                if (marker != null) markers.add(marker)
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error JSON: ${e.message}")
+        }
     }
 }
