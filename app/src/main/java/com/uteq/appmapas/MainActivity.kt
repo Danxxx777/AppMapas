@@ -34,7 +34,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     companion object {
-        private const val IP_BASE = "http://35.153.103.86/turismo10022025"
+        private const val IP_BASE = "URL"
         private const val INITIAL_LAT = -1.012389
         private const val INITIAL_LNG = -79.469222
         private const val INITIAL_RADIO = 500.0
